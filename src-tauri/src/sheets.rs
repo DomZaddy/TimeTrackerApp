@@ -5,7 +5,7 @@ use tauri_plugin_store::StoreExt;
 use serde::Deserialize;
 use chrono::Datelike;
 
-const DEFAULT_SHEET_ID: &str = "1dGwy97xuX6Vu6OfYTmDqmOlqXRRfqsb79RYyHqS775g";
+// No default — user must configure their own sheet in Settings
 const MONTH_NAMES: &[&str] = &[
     "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
     "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
@@ -68,7 +68,7 @@ async fn get_sheets_context(app: &AppHandle) -> Result<SheetsContext, Box<dyn st
         .map_err(|e| format!("Store error: {}", e))?;
     let raw_id = store.get("sheet-id")
         .and_then(|v| v.as_str().map(String::from))
-        .unwrap_or_else(|| DEFAULT_SHEET_ID.to_string());
+        .ok_or("No Google Sheet configured. Set your Sheet URL in Settings.")?;
 
     // Extract ID from URL if pasted
     let spreadsheet_id = if raw_id.contains("/spreadsheets/d/") {
