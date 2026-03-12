@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7b6bf0"/>
+      <stop offset="100%" style="stop-color:#5a4bd4"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="5.76" fill="url(#bg)"/>
+  <circle cx="16" cy="16" r="9.6" fill="none" stroke="white" stroke-width="1.5" opacity="0.95"/>
+  <line x1="16" y1="9.088000000000001" x2="16" y2="7.167999999999999" stroke="white" stroke-width="1.35" stroke-linecap="round"/><line x1="19.84" y1="9.348924898935511" x2="20.416" y2="8.351263633775837" stroke="white" stroke-width="0.8999999999999999" stroke-linecap="round"/><line x1="22.65107510106449" y1="12.16" x2="23.648736366224163" y2="11.584" stroke="white" stroke-width="0.8999999999999999" stroke-linecap="round"/><line x1="22.912" y1="16" x2="24.832" y2="16" stroke="white" stroke-width="1.35" stroke-linecap="round"/><line x1="22.65107510106449" y1="19.84" x2="23.648736366224163" y2="20.416" stroke="white" stroke-width="0.8999999999999999" stroke-linecap="round"/><line x1="19.84" y1="22.65107510106449" x2="20.416" y2="23.648736366224163" stroke="white" stroke-width="0.8999999999999999" stroke-linecap="round"/><line x1="16" y1="22.912" x2="16" y2="24.832" stroke="white" stroke-width="1.35" stroke-linecap="round"/><line x1="12.160000000000002" y1="22.65107510106449" x2="11.584000000000001" y2="23.648736366224163" stroke="white" stroke-width="0.8999999999999999" stroke-linecap="round"/><line x1="9.348924898935511" y1="19.84" x2="8.351263633775837" y2="20.416" stroke="white" stroke-width="0.8999999999999999" stroke-linecap="round"/><line x1="9.088000000000001" y1="16" x2="7.167999999999999" y2="16" stroke="white" stroke-width="1.35" stroke-linecap="round"/><line x1="9.348924898935511" y1="12.16" x2="8.351263633775837" y2="11.584" stroke="white" stroke-width="0.8999999999999999" stroke-linecap="round"/><line x1="12.159999999999997" y1="9.348924898935513" x2="11.583999999999996" y2="8.351263633775838" stroke="white" stroke-width="0.8999999999999999" stroke-linecap="round"/>
+  <line x1="16" y1="16" x2="18.4" y2="11.843078061834696" stroke="white" stroke-width="1.9500000000000002" stroke-linecap="round"/>
+  <line x1="16" y1="16" x2="22.912" y2="16" stroke="white" stroke-width="1.35" stroke-linecap="round"/>
+  <circle cx="16" cy="16" r="1.12" fill="white"/>
+</svg>

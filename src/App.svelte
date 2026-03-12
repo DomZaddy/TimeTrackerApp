@@ -1,0 +1,622 @@
+<script>
+  import { onMount } from "svelte";
+  import TitleBar from "./lib/components/TitleBar.svelte";
+  import ActivityRings from "./lib/components/ActivityRings.svelte";
+  import Controls from "./lib/components/Controls.svelte";
+  import NoteInput from "./lib/components/NoteInput.svelte";
+  import TimePicker from "./lib/components/TimePicker.svelte";
+  import SessionSummary from "./lib/components/SessionSummary.svelte";
+  import ReminderToast from "./lib/components/ReminderToast.svelte";
+  import RecoveryPrompt from "./lib/components/RecoveryPrompt.svelte";
+  import Settings from "./lib/components/Settings.svelte";
+  import WeeklyProgressBar from "./lib/components/WeeklyProgressBar.svelte";
+  import MoneyJar from "./lib/components/MoneyJar.svelte";
+  import Confetti from "./lib/components/Confetti.svelte";
+  import AchievementToast from "./lib/components/AchievementToast.svelte";
+  import WelcomeModal from "./lib/components/WelcomeModal.svelte";
+  import TutorialOverlay from "./lib/components/TutorialOverlay.svelte";
+  import * as timer from "./lib/stores/timer.js";
+  import * as session from "./lib/stores/session.js";
+  import * as gamification from "./lib/stores/gamification.js";
+  import * as weeklyHours from "./lib/stores/weeklyHours.js";
+  import * as nudges from "./lib/stores/nudges.js";
+  import * as tauri from "./lib/tauri.js";
+  import { parseSessionToBlocks } from "./lib/utils/parseSession.js";
+  import { formatElapsed, formatHoursDecimal } from "./lib/utils/formatTime.js";
+  import { playClockIn, playClockOut, playBreakStart } from "./lib/utils/microFeedback.js";
+  import { get } from "svelte/store";
+
+  const SAVE_INTERVAL_MS = 30000;
+  const MAX_SESSION_AGE_MS = 24 * 60 * 60 * 1000;
+  const MAX_CACHED_SESSIONS = 35;
+
+  let view = $state("tracker");
+  let widgetMode = $state(false);
+  let taskInput = $state("");
+  let showTimePicker = $state(false);
+  let timePickerMode = $state('start');
+  let showSummary = $state(false);
+  let summaryBlocks = $state([]);
+  let isPushing = $state(false);
+  let pushStatus = $state(null);
+  let recoveryData = $state(null);
+  let showWelcome = $state(false);
+  let showTutorial = $state(false);
+  let userName = $state("");
+  let taskCommitTimeout = null;
+  let saveInterval = null;
+
+  // Subscribe to stores
+  let elapsed = $state(0);
+  let breakElapsed = $state(0);
+  let isRunning = $state(false);
+  let isOnBreak = $state(false);
+  let notes = $state([]);
+  let toastQueue = $state([]);
+  let confettiTrigger = $state(0);
+  let totalWeekMs = $state(0);
+  let weekPercent = $state(0);
+  let weekLimitH = $state(40);
+  let isOvertime = $state(false);
+  let overtimeMs = $state(0);
+  let overtimeModeVal = $state(false);
+  let mPay = $state(0);
+  let mHours = $state(0);
+  let soundsOn = $state(true);
+
+  // Updater state
+  let updateStatus = $state(""); // "", "checking", "available", "downloading", "ready", "error"
+  let updateVersion = $state("");
+  let updateProgress = $state(0);
+  let updateRef = null;
+
+  // Taskbar badge: cache badge icons so we don't regenerate every tick
+  let workingBadge = null;
+  let breakBadge = null;
+  let badgesReady = $state(false);
+
+  // Pre-generate badge icons once
+  async function initBadges() {
+    workingBadge = await tauri.makeBadgeIcon('#00d68f');
+    breakBadge = await tauri.makeBadgeIcon('#f0932b');
+    badgesReady = true;
+  }
+  initBadges();
+
+  // Taskbar progress + overlay badge updates
+  $effect(() => {
+    if (!badgesReady) return;
+    if (isRunning) {
+      // Overlay badge: green = working, orange = break
+      tauri.setOverlayIcon(isOnBreak ? breakBadge : workingBadge);
+
+      // Taskbar progress bar: daily progress percentage
+      const dailyGoalMs = (weekLimitH / 5) * 3600000;
+      const pct = dailyGoalMs > 0 ? (elapsed / dailyGoalMs) * 100 : 0;
+      tauri.setTaskbarProgress(pct, isOnBreak ? 'paused' : 'normal');
+    } else {
+      tauri.clearTaskbarBadge();
+    }
+  });
+
+  onMount(() => {
+    const unsubs = [
+      timer.elapsed.subscribe((v) => (elapsed = v)),
+      timer.breakElapsed.subscribe((v) => (breakElapsed = v)),
+      timer.isRunning.subscribe((v) => (isRunning = v)),
+      timer.isOnBreak.subscribe((v) => (isOnBreak = v)),
+      session.notes.subscribe((v) => (notes = v)),
+      gamification.toastQueue.subscribe((v) => (toastQueue = v)),
+      gamification.confettiTrigger.subscribe((v) => (confettiTrigger = v)),
+      weeklyHours.totalWeekMs.subscribe((v) => (totalWeekMs = v)),
+      weeklyHours.weekPercent.subscribe((v) => (weekPercent = v)),
+      weeklyHours.weekLimitHours.subscribe((v) => (weekLimitH = v)),
+      weeklyHours.isOvertime.subscribe((v) => (isOvertime = v)),
+      weeklyHours.overtimeMs.subscribe((v) => (overtimeMs = v)),
+      weeklyHours.overtimeMode.subscribe((v) => (overtimeModeVal = v)),
+      weeklyHours.monthlyPay.subscribe((v) => (mPay = v)),
+      weeklyHours.monthlyHours.subscribe((v) => (mHours = v)),
+      gamification.soundsEnabled.subscribe((v) => (soundsOn = v)),
+    ];
+
+    init();
+
+    // Auto-check for updates on launch (delay 3s so UI loads first)
+    setTimeout(autoCheckUpdate, 3000);
+
+    return () => {
+      unsubs.forEach((u) => u());
+      if (saveInterval) clearInterval(saveInterval);
+      nudges.stopNudgeChecks();
+    };
+  });
+
+  async function init() {
+    await gamification.loadGamification();
+    await weeklyHours.loadWeeklySettings();
+    await nudges.loadNudgeSettings();
+    await weeklyHours.fetchWeekHours();
+
+    const name = await tauri.storeGet("user-name");
+    if (name) {
+      userName = name;
+    } else {
+      showWelcome = true;
+    }
+
+    const saved = await tauri.storeGet("active-session");
+    if (saved && Date.now() - saved.savedAt < MAX_SESSION_AGE_MS) {
+      recoveryData = saved;
+    } else if (saved) {
+      await tauri.storeDelete("active-session");
+    }
+  }
+
+  function handleTaskChange(value) {
+    taskInput = value;
+    if (taskCommitTimeout) clearTimeout(taskCommitTimeout);
+    taskCommitTimeout = setTimeout(() => {
+      session.commitTask(value);
+    }, 2000);
+  }
+
+  function handleTaskBlur() {
+    if (taskCommitTimeout) clearTimeout(taskCommitTimeout);
+    session.commitTask(taskInput);
+  }
+
+  function buildSnapshot() {
+    const snap = timer.getSnapshot();
+    return {
+      version: 1,
+      savedAt: Date.now(),
+      startTime: snap.startTime,
+      tasks: get(session.tasks),
+      taskInput,
+      notes: get(session.notes),
+      breaks: get(session.breaks),
+      totalBreakMs: snap.totalBreakMs,
+      isOnBreak: snap.isOnBreak,
+      breakStartTime: snap.breakStartTime,
+    };
+  }
+
+  async function saveSession() {
+    if (!isRunning) return;
+    const snapshot = buildSnapshot();
+    await tauri.storeSet("active-session", snapshot);
+    await tauri.sheetsStatusUpdate({
+      task: get(session.currentTask),
+      start_time: snapshot.startTime,
+      elapsed,
+    });
+  }
+
+  function handleClockIn() {
+    timePickerMode = 'start';
+    showTimePicker = true;
+  }
+
+  function handleClockOut() {
+    timePickerMode = 'stop';
+    showTimePicker = true;
+  }
+
+  function handleToggleBreakPicker() {
+    timePickerMode = isOnBreak ? 'break-end' : 'break-start';
+    showTimePicker = true;
+  }
+
+  async function handleTimeConfirm(customTime) {
+    showTimePicker = false;
+
+    if (timePickerMode === 'start') {
+      const startTime = customTime || Date.now();
+      timer.start(customTime);
+      session.startSession(startTime);
+      taskInput = "";
+      gamification.onClockIn(startTime);
+      nudges.startNudgeChecks();
+      if (soundsOn) playClockIn();
+
+      tauri.sheetsStatusStart({ task: "", start_time: startTime, elapsed: 0 });
+      weeklyHours.fetchWeekHours(true);
+
+      if (saveInterval) clearInterval(saveInterval);
+      saveInterval = setInterval(saveSession, SAVE_INTERVAL_MS);
+    } else if (timePickerMode === 'break-start') {
+      // Start a break (with optional custom time)
+      const breakTime = customTime || Date.now();
+      session.startBreak();
+      if (soundsOn) playBreakStart();
+      // If custom time, adjust the timer to account for the difference
+      if (customTime) {
+        const diff = Date.now() - customTime;
+        timer.addBreakMs(diff);
+      }
+      timer.toggleBreak();
+    } else if (timePickerMode === 'break-end') {
+      // End a break (with optional custom time)
+      if (customTime) {
+        // Calculate how much break time to remove (we over-counted from break start to now, should be break start to custom time)
+        const breakStartMs = timer.getSnapshot().breakStartTime;
+        if (breakStartMs) {
+          const actualBreak = customTime - breakStartMs;
+          const overcounted = Date.now() - breakStartMs;
+          // Timer will add overcounted when toggleBreak is called, so pre-subtract the difference
+          timer.removeBreakMs(overcounted - actualBreak);
+        }
+      }
+      session.endBreak();
+      nudges.onBreakEnd();
+      timer.toggleBreak();
+    } else {
+      // Clock out
+      if (taskCommitTimeout) clearTimeout(taskCommitTimeout);
+      session.commitTask(taskInput);
+
+      const endTime = customTime || Date.now();
+      const timerData = timer.stop(endTime);
+      session.endSession(endTime);
+      nudges.stopNudgeChecks();
+      if (soundsOn) playClockOut();
+
+      if (saveInterval) clearInterval(saveInterval);
+      saveInterval = null;
+
+      const sessionData = session.getSessionData();
+      if (sessionData) {
+        sessionData.endTime = endTime;
+        summaryBlocks = parseSessionToBlocks(sessionData);
+
+        // Cache the session before pushing (backup/memory)
+        await cacheSession(buildSnapshot(), summaryBlocks);
+
+        // Push session blocks
+        await handlePush(summaryBlocks);
+      }
+
+      // Only clear active-session after successful push
+      if (pushStatus && !pushStatus.startsWith("Error") && !pushStatus.startsWith("Push failed")) {
+        await tauri.storeDelete("active-session");
+      }
+    }
+  }
+
+
+  async function cacheSession(snapshot, blocks) {
+    const entry = {
+      snapshot,
+      blocks,
+      cachedAt: Date.now(),
+      date: new Date(snapshot.startTime).toLocaleDateString(),
+    };
+    const cache = (await tauri.storeGet("session-cache")) || [];
+    cache.unshift(entry); // newest first
+    if (cache.length > MAX_CACHED_SESSIONS) cache.length = MAX_CACHED_SESSIONS;
+    await tauri.storeSet("session-cache", cache);
+  }
+
+  async function rePushLastSession() {
+    const cache = (await tauri.storeGet("session-cache")) || [];
+    if (cache.length === 0) return;
+    const last = cache[0];
+    if (last.blocks && last.blocks.length > 0) {
+      await handlePush(last.blocks);
+    }
+  }
+
+  async function handlePush(blocks) {
+    isPushing = true;
+    pushStatus = null;
+
+    let result;
+    try {
+      result = await tauri.sheetsPush(blocks);
+    } catch (err) {
+      console.error("sheetsPush invoke error:", err);
+      isPushing = false;
+      pushStatus = `Push failed: ${err}`;
+      return;
+    }
+    isPushing = false;
+
+    if (result.success) {
+      pushStatus = `Pushed ${result.row_count} rows`;
+      weeklyHours.fetchWeekHours(true);
+
+      const sessionData = session.getSessionData();
+      const elapsedMs = sessionData ? sessionData.endTime - sessionData.startTime : 0;
+      gamification.onSessionPush({
+        elapsedMs,
+        notesCount: notes.length,
+        payAccrued: mPay,
+        monthTab: "",
+      });
+
+      setTimeout(() => {
+        showSummary = false;
+        session.clearSession();
+        taskInput = "";
+        pushStatus = null;
+      }, 1500);
+    } else {
+      pushStatus = `Error: ${result.error}`;
+    }
+  }
+
+  function handleDiscard() {
+    showSummary = false;
+    session.clearSession();
+    taskInput = "";
+    tauri.storeDelete("active-session");
+    tauri.sheetsStatusClear();
+  }
+
+  async function handleResumeSession() {
+    if (!recoveryData) return;
+    try {
+      timer.restore({
+        startTime: recoveryData.startTime,
+        totalBreakMs: recoveryData.totalBreakMs || 0,
+        breakStartTime: recoveryData.breakStartTime,
+        isOnBreak: recoveryData.isOnBreak || false,
+      });
+      session.restoreSession({
+        startTime: recoveryData.startTime,
+        notes: Array.isArray(recoveryData.notes) ? recoveryData.notes : [],
+        breaks: Array.isArray(recoveryData.breaks) ? recoveryData.breaks : [],
+        tasks: Array.isArray(recoveryData.tasks) ? recoveryData.tasks : [],
+      });
+      const lastTask =
+        recoveryData.taskInput ||
+        (Array.isArray(recoveryData.tasks) && recoveryData.tasks.length > 0
+          ? recoveryData.tasks[recoveryData.tasks.length - 1].name
+          : "");
+      taskInput = lastTask;
+      nudges.startNudgeChecks();
+
+      // Clear any stale live status, then write fresh "Currently working" row
+      await tauri.sheetsStatusClear();
+      await tauri.sheetsStatusStart({
+        task: lastTask,
+        start_time: recoveryData.startTime,
+        elapsed: 0,
+      });
+
+      if (saveInterval) clearInterval(saveInterval);
+      saveInterval = setInterval(saveSession, SAVE_INTERVAL_MS);
+    } catch (e) {
+      console.error("Recovery failed:", e);
+    }
+    recoveryData = null;
+  }
+
+  function handleDiscardRecovery() {
+    tauri.storeDelete("active-session").catch(() => {});
+    recoveryData = null;
+  }
+
+  async function autoCheckUpdate() {
+    updateStatus = "checking";
+    const result = await tauri.checkForUpdate();
+    if (result.available) {
+      updateStatus = "available";
+      updateVersion = result.version;
+      updateRef = result;
+    } else {
+      updateStatus = "";
+    }
+  }
+
+  async function installUpdate() {
+    if (!updateRef) return;
+    updateStatus = "downloading";
+    updateProgress = 0;
+    try {
+      await updateRef.download(({ downloaded, total }) => {
+        updateProgress = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+      });
+      updateStatus = "ready";
+      await updateRef.relaunch();
+    } catch (e) {
+      updateStatus = "error";
+      console.error("[updater] install failed:", e);
+      // Retry check after 30s
+      setTimeout(autoCheckUpdate, 30000);
+    }
+  }
+
+  function toggleWidget() {
+    widgetMode = !widgetMode;
+    if (widgetMode) view = "tracker";
+    tauri.setWidgetMode(widgetMode);
+  }
+
+  async function handleWelcomeComplete(name) {
+    userName = name;
+    await tauri.storeSet("user-name", name);
+    showWelcome = false;
+    const tutDone = await tauri.storeGet("tutorial-completed");
+    if (!tutDone) showTutorial = true;
+  }
+</script>
+
+<div class={widgetMode ? "widget-mode" : ""}>
+  <TitleBar {widgetMode} onToggleWidget={toggleWidget} {updateStatus} {updateVersion} {updateProgress} onInstallUpdate={installUpdate} />
+  <ReminderToast />
+
+  <div class="app-content">
+    <div class="view-tabs">
+      <button
+        class="view-tab"
+        class:active={view === "tracker"}
+        onclick={() => (view = "tracker")}
+      >
+        {widgetMode ? "⏱" : "Tracker"}
+      </button>
+      <button
+        class="view-tab"
+        class:active={view === "earnings"}
+        onclick={() => {
+          if (widgetMode) toggleWidget();
+          view = "earnings";
+        }}
+      >
+        {widgetMode ? "💰" : "Earnings"}
+      </button>
+      <button
+        class="view-tab"
+        class:active={view === "settings"}
+        onclick={() => {
+          if (widgetMode) toggleWidget();
+          view = "settings";
+        }}
+      >
+        {widgetMode ? "⚙️" : "Settings"}
+      </button>
+    </div>
+
+    <div class="tab-content">
+      {#if view === "tracker"}
+        <div class="tracker-layout">
+          <div class="tracker-main">
+            <ActivityRings
+              {elapsed}
+              {breakElapsed}
+              {isRunning}
+              {isOnBreak}
+              dailyGoalHours={weekLimitH / 5}
+              {weekPercent}
+              compact={widgetMode}
+            />
+
+            {#if !widgetMode}
+              <div class="task-section">
+                <div class="task-label">Current Task</div>
+                <input
+                  class="task-input"
+                  value={taskInput}
+                  oninput={(e) => handleTaskChange(e.target.value)}
+                  onblur={handleTaskBlur}
+                  placeholder="What are you working on?"
+                />
+              </div>
+            {/if}
+
+            <Controls
+              {isRunning}
+              {isOnBreak}
+              onClockIn={handleClockIn}
+              onClockOut={handleClockOut}
+              onToggleBreak={handleToggleBreakPicker}
+              compact={widgetMode}
+            />
+
+            {#if !widgetMode}
+              <NoteInput
+                {notes}
+                onAddNote={(text) => {
+                  session.addNote(text);
+                  gamification.onNoteAdded();
+                }}
+                {isRunning}
+              />
+            {/if}
+          </div>
+        </div>
+      {:else if view === "earnings"}
+        <MoneyJar
+          monthlyPay={mPay}
+          monthlyHours={mHours}
+          weekLimitHours={weekLimitH}
+          {isRunning}
+          {elapsed}
+        />
+      {:else if view === "settings"}
+        <Settings
+          {userName}
+          onSaveName={async (name) => {
+            userName = name;
+            await tauri.storeSet("user-name", name);
+          }}
+          onStartTutorial={async () => {
+            await tauri.storeSet("tutorial-completed", false);
+            showTutorial = true;
+          }}
+          onAuthSuccess={() => {
+            if (isRunning) {
+              const snap = timer.getSnapshot();
+              tauri.sheetsStatusStart({
+                task: get(session.currentTask) || taskInput,
+                start_time: snap.startTime,
+                elapsed,
+              });
+              weeklyHours.fetchWeekHours(true);
+            }
+          }}
+        />
+      {/if}
+    </div>
+  </div>
+
+  {#if showTimePicker}
+    <TimePicker
+      mode={timePickerMode}
+      onConfirm={handleTimeConfirm}
+      onCancel={() => (showTimePicker = false)}
+    />
+  {/if}
+
+
+  {#if showSummary}
+    <SessionSummary
+      blocks={summaryBlocks}
+      onPush={handlePush}
+      onDiscard={handleDiscard}
+      {isPushing}
+    />
+  {/if}
+
+  {#if recoveryData}
+    <RecoveryPrompt
+      data={recoveryData}
+      onResume={handleResumeSession}
+      onDiscard={handleDiscardRecovery}
+    />
+  {/if}
+
+  {#if pushStatus}
+    <div
+      class="push-status-toast"
+      style="background: {pushStatus.includes('Error')
+        ? 'var(--red)'
+        : 'var(--green)'}"
+    >
+      {pushStatus.includes("Error") ? "⚠️" : "✓"}
+      {pushStatus}
+    </div>
+  {/if}
+
+  <WeeklyProgressBar
+    {totalWeekMs}
+    {weekPercent}
+    {isOvertime}
+    {overtimeMs}
+    overtimeMode={overtimeModeVal}
+    weekLimitHours={weekLimitH}
+    {isRunning}
+    {elapsed}
+  />
+
+  <Confetti trigger={confettiTrigger} />
+  <AchievementToast queue={toastQueue} onDismiss={gamification.dismissToast} />
+
+  {#if showTutorial}
+    <TutorialOverlay {userName} onComplete={() => (showTutorial = false)} onSwitchTab={(tab) => (view = tab)} />
+  {/if}
+
+  {#if showWelcome && !recoveryData}
+    <WelcomeModal onComplete={handleWelcomeComplete} />
+  {/if}
+</div>
