@@ -1298,3 +1298,67 @@ body {
   from { opacity: 0; transform: translateX(-50%) translateY(4px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+
+/* Update banner (Discord-style) */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 16px;
+  background: var(--green);
+  color: #000;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: background 0.2s;
+}
+.update-banner:hover {
+  background: #00e89d;
+}
+.update-banner-icon {
+  font-size: 14px;
+}
+.update-banner--downloading {
+  background: var(--card);
+  color: var(--text);
+  cursor: default;
+  padding: 0;
+  height: 32px;
+}
+.update-banner-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--accent);
+  opacity: 0.3;
+  transition: width 0.3s ease;
+}
+.update-banner-text {
+  position: relative;
+  z-index: 1;
+  padding: 8px;
+}
+.update-banner--ready {
+  background: var(--accent);
+  color: #fff;
+  cursor: default;
+  animation: pulse-banner 1.5s ease-in-out infinite;
+}
+.update-banner--error {
+  background: var(--red, #e74c3c);
+  color: #fff;
+  cursor: pointer;
+}
+.update-banner--error:hover {
+  opacity: 0.9;
+}
+@keyframes pulse-banner {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}

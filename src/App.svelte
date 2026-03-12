@@ -76,6 +76,7 @@
   let updateVersion = $state("");
   let updateProgress = $state(0);
   let updateRef = null;
+  let updateError = $state("");
 
   // Taskbar badge: cache badge icons so we don't regenerate every tick
   let workingBadge = null;
@@ -430,22 +431,51 @@
   }
 
   async function autoCheckUpdate() {
+    // Don't interrupt an active download
+    if (updateStatus === "downloading" || updateStatus === "ready") return;
     try {
       updateStatus = "checking";
+      updateError = "";
       console.log("[updater] checking for updates...");
+
+      // Try Tauri updater plugin first
       const result = await tauri.checkForUpdate();
       if (result.available) {
         updateStatus = "available";
         updateVersion = result.version;
         updateRef = result;
-        console.log(`[updater] update available: v${result.version}`);
-      } else {
-        updateStatus = "";
-        if (result.error) {
-          console.warn("[updater] check returned error:", result.error);
-        } else {
-          console.log("[updater] no update available");
+        console.log(`[updater] update available via plugin: v${result.version}`);
+        return;
+      }
+
+      // Fallback: direct HTTP fetch of latest.json to verify
+      if (!result.available) {
+        console.log("[updater] plugin says no update, double-checking via HTTP...");
+        try {
+          const resp = await fetch("https://github.com/DomZaddy/TimeTrackerApp/releases/latest/download/latest.json");
+          if (resp.ok) {
+            const data = await resp.json();
+            const currentVersion = __APP_VERSION__;
+            console.log(`[updater] current: v${currentVersion}, latest: v${data.version}`);
+            if (data.version && data.version !== currentVersion && isNewerVersion(data.version, currentVersion)) {
+              // Plugin missed it — set status to available with download link
+              updateStatus = "available";
+              updateVersion = data.version;
+              updateRef = result.available ? result : null;
+              console.log(`[updater] HTTP check found update: v${data.version}`);
+              return;
+            }
+          }
+        } catch (httpErr) {
+          console.warn("[updater] HTTP fallback failed:", httpErr);
         }
+      }
+
+      updateStatus = "";
+      if (result.error) {
+        console.warn("[updater] check returned error:", result.error);
+      } else {
+        console.log("[updater] app is up to date");
       }
     } catch (e) {
       updateStatus = "";
@@ -453,21 +483,41 @@
     }
   }
 
+  function isNewerVersion(latest, current) {
+    const l = latest.split(".").map(Number);
+    const c = current.split(".").map(Number);
+    for (let i = 0; i < Math.max(l.length, c.length); i++) {
+      if ((l[i] || 0) > (c[i] || 0)) return true;
+      if ((l[i] || 0) < (c[i] || 0)) return false;
+    }
+    return false;
+  }
+
   async function installUpdate() {
-    if (!updateRef) return;
-    updateStatus = "downloading";
-    updateProgress = 0;
-    try {
-      await updateRef.download(({ downloaded, total }) => {
-        updateProgress = total > 0 ? Math.round((downloaded / total) * 100) : 0;
-      });
-      updateStatus = "ready";
-      await updateRef.relaunch();
-    } catch (e) {
-      updateStatus = "error";
-      console.error("[updater] install failed:", e);
-      // Retry check after 30s
-      setTimeout(autoCheckUpdate, 30000);
+    if (updateRef && updateRef.download) {
+      // Tauri plugin update path
+      updateStatus = "downloading";
+      updateProgress = 0;
+      try {
+        await updateRef.download(({ downloaded, total }) => {
+          updateProgress = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+        });
+        updateStatus = "ready";
+        await updateRef.relaunch();
+      } catch (e) {
+        updateStatus = "error";
+        updateError = e.toString();
+        console.error("[updater] plugin install failed:", e);
+        setTimeout(autoCheckUpdate, 30000);
+      }
+    } else {
+      // Fallback: open releases page in browser
+      try {
+        const { open } = await import("@tauri-apps/plugin-shell");
+        await open(`https://github.com/DomZaddy/TimeTrackerApp/releases/tag/v${updateVersion}`);
+      } catch {
+        window.open(`https://github.com/DomZaddy/TimeTrackerApp/releases/tag/v${updateVersion}`);
+      }
     }
   }
 
@@ -548,6 +598,27 @@
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <div class={widgetMode ? "widget-mode" : ""} onclick={handleGlobalClick}>
   <TitleBar {widgetMode} onToggleWidget={toggleWidget} {updateStatus} {updateVersion} {updateProgress} onInstallUpdate={installUpdate} />
+
+  {#if updateStatus === "available"}
+    <button class="update-banner" onclick={installUpdate}>
+      <span class="update-banner-icon">⬇</span>
+      <span>Update v{updateVersion} is ready — click to {updateRef?.download ? "install" : "download"}</span>
+    </button>
+  {:else if updateStatus === "downloading"}
+    <div class="update-banner update-banner--downloading">
+      <div class="update-banner-progress" style="width: {updateProgress}%"></div>
+      <span class="update-banner-text">Downloading update... {updateProgress}%</span>
+    </div>
+  {:else if updateStatus === "ready"}
+    <div class="update-banner update-banner--ready">
+      <span>Restarting...</span>
+    </div>
+  {:else if updateStatus === "error"}
+    <button class="update-banner update-banner--error" onclick={autoCheckUpdate}>
+      <span>Update failed — click to retry</span>
+    </button>
+  {/if}
+
   <ReminderToast />
 
   <div class="app-content">
