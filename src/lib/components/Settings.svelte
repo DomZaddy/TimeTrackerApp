@@ -8,7 +8,7 @@
   import { showReminder } from "../stores/reminderToast.js";
   import { get } from "svelte/store";
 
-  let { userName = "", onSaveName, onStartTutorial, onAuthSuccess } = $props();
+  let { userName = "", onSaveName, onStartTutorial, onAuthSuccess, updateStatus = "", updateVersion = "", onCheckUpdate, onInstallUpdate } = $props();
 
   let editingName = $state(false);
   let nameInput = $state("");
@@ -531,10 +531,29 @@
     </div>
   </div>
 
-  <!-- App Info -->
-  <div class="section">
-    <h3 class="section-title">About</h3>
-    <p style="font-size: 11px; color: var(--text-dim)">TimeTracker v{__APP_VERSION__}</p>
-    <p style="font-size: 10px; color: var(--text-dim); opacity: 0.6; margin-top: 4px">Updates appear in the title bar automatically</p>
+  <!-- App Info & Updates -->
+  <div class="settings-section">
+    <h3>About & Updates</h3>
+    <div class="setting-row">
+      <div>
+        <span class="setting-label">Current version</span>
+        <div class="setting-hint">TimeTracker v{__APP_VERSION__}</div>
+      </div>
+      {#if updateStatus === "available"}
+        <button class="btn btn-start" style="padding: 6px 14px; font-size: 12px" onclick={onInstallUpdate}>
+          Update to v{updateVersion}
+        </button>
+      {:else if updateStatus === "checking"}
+        <span style="font-size: 11px; color: var(--text-dim)">Checking...</span>
+      {:else if updateStatus === "downloading"}
+        <span style="font-size: 11px; color: var(--green)">Downloading...</span>
+      {:else if updateStatus === "ready"}
+        <span style="font-size: 11px; color: var(--accent)">Restarting...</span>
+      {:else}
+        <button class="btn btn-ghost btn-sm" style="font-size: 11px" onclick={onCheckUpdate}>
+          Check for Updates
+        </button>
+      {/if}
+    </div>
   </div>
 </div>

@@ -130,8 +130,21 @@
 
     // Auto-check for updates on launch (delay 3s so UI loads first)
     setTimeout(autoCheckUpdate, 3000);
-    // Re-check for updates every 30 minutes
-    const updateCheckInterval = setInterval(autoCheckUpdate, 30 * 60 * 1000);
+    // Re-check for updates every 10 minutes
+    const updateCheckInterval = setInterval(autoCheckUpdate, 10 * 60 * 1000);
+    // Also check when window regains focus (throttled to once per 2 minutes)
+    let lastFocusCheck = 0;
+    function onFocusCheck() {
+      const now = Date.now();
+      if (now - lastFocusCheck > 2 * 60 * 1000 && updateStatus !== "available" && updateStatus !== "downloading") {
+        lastFocusCheck = now;
+        autoCheckUpdate();
+      }
+    }
+    window.addEventListener("focus", onFocusCheck);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) onFocusCheck();
+    });
 
     // Backfill OOO on launch (delay 5s so auth loads first)
     setTimeout(backfillOoo, 5000);
@@ -145,6 +158,7 @@
       if (saveInterval) clearInterval(saveInterval);
       if (oooCheckInterval) clearInterval(oooCheckInterval);
       if (updateCheckInterval) clearInterval(updateCheckInterval);
+      window.removeEventListener("focus", onFocusCheck);
       nudges.stopNudgeChecks();
     };
   });
@@ -689,6 +703,10 @@
               weeklyHours.fetchWeekHours(true);
             }
           }}
+          {updateStatus}
+          {updateVersion}
+          onCheckUpdate={autoCheckUpdate}
+          onInstallUpdate={installUpdate}
         />
       {/if}
     </div>
