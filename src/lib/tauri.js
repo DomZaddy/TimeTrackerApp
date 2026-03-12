@@ -57,6 +57,15 @@ export async function sheetsFetchWeekHours() {
   return await invoke("sheets_fetch_week_hours");
 }
 
+// Out of Office
+export async function sheetsMarkOoo(dates, reason = "") {
+  return await invoke("sheets_mark_ooo", { request: { dates, reason } });
+}
+
+export async function sheetsBackfillOoo() {
+  return await invoke("sheets_backfill_ooo");
+}
+
 // Notifications
 export async function sendNudge(data) {
   return await invoke("send_nudge", { data });

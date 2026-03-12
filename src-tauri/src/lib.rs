@@ -169,6 +169,29 @@ async fn sheets_fetch_week_hours(app: AppHandle) -> WeekHoursResult {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct OooRequest {
+    pub dates: Vec<String>,
+    #[serde(default)]
+    pub reason: String,
+}
+
+#[tauri::command]
+async fn sheets_mark_ooo(app: AppHandle, request: OooRequest) -> PushResult {
+    match sheets::mark_ooo(&app, request.dates, request.reason).await {
+        Ok(count) => PushResult { success: true, error: None, row_count: Some(count) },
+        Err(e) => PushResult { success: false, error: Some(e.to_string()), row_count: None },
+    }
+}
+
+#[tauri::command]
+async fn sheets_backfill_ooo(app: AppHandle) -> PushResult {
+    match sheets::backfill_ooo(&app).await {
+        Ok(count) => PushResult { success: true, error: None, row_count: Some(count) },
+        Err(e) => PushResult { success: false, error: Some(e.to_string()), row_count: None },
+    }
+}
+
 #[tauri::command]
 async fn send_nudge<R: Runtime>(app: AppHandle<R>, data: NudgeData) {
     let _ = app.notification()
@@ -284,6 +307,8 @@ pub fn run() {
             sheets_status_update,
             sheets_status_clear,
             sheets_fetch_week_hours,
+            sheets_mark_ooo,
+            sheets_backfill_ooo,
             send_nudge,
             send_reminder,
         ])

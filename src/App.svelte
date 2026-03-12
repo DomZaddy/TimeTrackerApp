@@ -29,6 +29,7 @@
   const SAVE_INTERVAL_MS = 30000;
   const MAX_SESSION_AGE_MS = 24 * 60 * 60 * 1000;
   const MAX_CACHED_SESSIONS = 35;
+  const OOO_CHECK_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
   let view = $state("tracker");
   let widgetMode = $state(false);
@@ -45,6 +46,10 @@
   let userName = $state("");
   let taskCommitTimeout = null;
   let saveInterval = null;
+  let oooCheckInterval = null;
+  let lastOooCheckDay = null;
+  let showOooMenu = $state(false);
+  let oooStatus = $state(""); // "", "marking", "done"
 
   // Subscribe to stores
   let elapsed = $state(0);
@@ -124,9 +129,17 @@
     // Auto-check for updates on launch (delay 3s so UI loads first)
     setTimeout(autoCheckUpdate, 3000);
 
+    // Backfill OOO on launch (delay 5s so auth loads first)
+    setTimeout(backfillOoo, 5000);
+
+    // Idle day watcher: check every 30min if we crossed midnight without clocking in
+    lastOooCheckDay = new Date().toDateString();
+    oooCheckInterval = setInterval(idleDayCheck, OOO_CHECK_INTERVAL_MS);
+
     return () => {
       unsubs.forEach((u) => u());
       if (saveInterval) clearInterval(saveInterval);
+      if (oooCheckInterval) clearInterval(oooCheckInterval);
       nudges.stopNudgeChecks();
     };
   });
@@ -427,6 +440,52 @@
     }
   }
 
+  async function backfillOoo() {
+    try {
+      const result = await tauri.sheetsBackfillOoo();
+      if (result.success && result.row_count > 0) {
+        console.log(`[ooo] backfilled ${result.row_count} days`);
+      }
+    } catch (e) {
+      // Silently fail — user may not be signed in yet
+      console.warn("[ooo] backfill skipped:", e);
+    }
+  }
+
+  function idleDayCheck() {
+    const today = new Date().toDateString();
+    if (today !== lastOooCheckDay && !isRunning) {
+      lastOooCheckDay = today;
+      backfillOoo();
+    }
+  }
+
+  function handleGlobalClick(e) {
+    if (showOooMenu && !e.target.closest(".ooo-wrapper")) {
+      showOooMenu = false;
+    }
+  }
+
+  async function markTodayOoo(reason) {
+    showOooMenu = false;
+    oooStatus = "marking";
+    const today = new Date();
+    const dateStr = `${String(today.getMonth() + 1).padStart(2, "0")}/${String(today.getDate()).padStart(2, "0")}/${today.getFullYear()}`;
+    try {
+      const result = await tauri.sheetsMarkOoo([dateStr], reason);
+      if (result.success) {
+        oooStatus = "done";
+        setTimeout(() => (oooStatus = ""), 2000);
+      } else {
+        oooStatus = "";
+        console.error("[ooo] mark failed:", result.error);
+      }
+    } catch (e) {
+      oooStatus = "";
+      console.error("[ooo] mark failed:", e);
+    }
+  }
+
   function toggleWidget() {
     widgetMode = !widgetMode;
     if (widgetMode) view = "tracker";
@@ -442,7 +501,8 @@
   }
 </script>
 
-<div class={widgetMode ? "widget-mode" : ""}>
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+<div class={widgetMode ? "widget-mode" : ""} onclick={handleGlobalClick}>
   <TitleBar {widgetMode} onToggleWidget={toggleWidget} {updateStatus} {updateVersion} {updateProgress} onInstallUpdate={installUpdate} />
   <ReminderToast />
 
@@ -512,6 +572,35 @@
               onToggleBreak={handleToggleBreakPicker}
               compact={widgetMode}
             />
+
+            {#if !widgetMode && !isRunning}
+              <div class="ooo-section">
+                {#if oooStatus === "marking"}
+                  <div class="ooo-badge marking">Marking OOO...</div>
+                {:else if oooStatus === "done"}
+                  <div class="ooo-badge done">Marked Out of Office</div>
+                {:else}
+                  <div class="ooo-wrapper">
+                    <button class="ooo-btn" onclick={() => (showOooMenu = !showOooMenu)} title="Mark today as Out of Office">
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+                        <circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 2"/>
+                      </svg>
+                      <span>Out of Office</span>
+                    </button>
+                    {#if showOooMenu}
+                      <div class="ooo-menu">
+                        <button onclick={() => markTodayOoo("")}>No Reason</button>
+                        <button onclick={() => markTodayOoo("PTO")}>PTO</button>
+                        <button onclick={() => markTodayOoo("Sick")}>Sick</button>
+                        <button onclick={() => markTodayOoo("Holiday")}>Holiday</button>
+                        <button onclick={() => markTodayOoo("Personal")}>Personal</button>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/if}
 
             {#if !widgetMode}
               <NoteInput

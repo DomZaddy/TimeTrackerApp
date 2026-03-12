@@ -1182,3 +1182,82 @@ body {
   0% { transform: scale(0.95); opacity: 0.4; }
   100% { transform: scale(1.1); opacity: 0; }
 }
+
+/* ===== Out of Office ===== */
+.ooo-section {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+.ooo-wrapper {
+  position: relative;
+}
+.ooo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.ooo-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--text);
+}
+.ooo-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  min-width: 130px;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  animation: fadeInUp 0.12s ease-out;
+}
+.ooo-menu button {
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+.ooo-menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.ooo-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.ooo-badge.marking {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+}
+.ooo-badge.done {
+  background: rgba(0, 214, 143, 0.15);
+  color: var(--green);
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

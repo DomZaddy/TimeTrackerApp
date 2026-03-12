@@ -562,6 +562,168 @@ pub async fn fetch_week_hours(app: &AppHandle) -> Result<WeekHoursResult, Box<dy
     })
 }
 
+pub async fn mark_ooo(app: &AppHandle, dates: Vec<String>, reason: String) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    let ctx = get_sheets_context(app).await?;
+
+    let label = if reason.is_empty() {
+        "—— Out of Office ——".to_string()
+    } else {
+        format!("—— Out of Office ({}) ——", reason)
+    };
+
+    let mut count = 0;
+
+    for date_str in &dates {
+        // Determine the sheet tab from the date
+        let parts: Vec<&str> = date_str.split('/').collect();
+        if parts.len() != 3 { continue; }
+        let month: usize = parts[0].parse().unwrap_or(1);
+        let year = parts[2];
+        let sheet_tab = format!("{}/{}", MONTH_NAMES[month.saturating_sub(1)], year);
+
+        // Check if this date already has an entry
+        let range = format!("'{}'!A:B", sheet_tab);
+        let values = sheets_get(&ctx, &range).await.unwrap_or_default();
+        let mut already_exists = false;
+        for row in &values {
+            let cell_date = row.first().map(|s| s.trim()).unwrap_or("");
+            if dates_match(cell_date, date_str) {
+                let cell_task = row.get(1).map(|s| s.trim()).unwrap_or("");
+                if !cell_task.is_empty() {
+                    already_exists = true;
+                    break;
+                }
+            }
+        }
+        if already_exists { continue; }
+
+        let target_row = find_date_row(&ctx, &sheet_tab, date_str).await?;
+
+        // A-B: Date, OOO label
+        let ab_range = format!("'{}'!A{}:B{}", sheet_tab, target_row, target_row);
+        sheets_update_raw(&ctx, &ab_range, vec![vec![
+            date_str.clone(), label.clone(),
+        ]]).await?;
+
+        // H: 0 hours
+        let h_range = format!("'{}'!H{}", sheet_tab, target_row);
+        sheets_update(&ctx, &h_range, vec![vec!["0".to_string()]]).await?;
+
+        // K: Reason note
+        if !reason.is_empty() {
+            let k_range = format!("'{}'!K{}", sheet_tab, target_row);
+            sheets_update_raw(&ctx, &k_range, vec![vec![reason.clone()]]).await?;
+        }
+
+        count += 1;
+    }
+
+    // Update last-ooo-check to today
+    let store = app.store("timetracker-store.json")
+        .map_err(|e| format!("Store error: {}", e))?;
+    let today = chrono::Local::now().format("%m/%d/%Y").to_string();
+    let _ = store.set("last-ooo-check", serde_json::json!(today));
+
+    Ok(count)
+}
+
+pub async fn backfill_ooo(app: &AppHandle) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    let ctx = get_sheets_context(app).await?;
+    let store = app.store("timetracker-store.json")
+        .map_err(|e| format!("Store error: {}", e))?;
+
+    let now = chrono::Local::now();
+    let today = now.date_naive();
+    let yesterday = today - chrono::Duration::days(1);
+
+    // Determine start date: last-ooo-check or 30 days ago
+    let start_date = if let Some(val) = store.get("last-ooo-check") {
+        if let Some(s) = val.as_str() {
+            parse_date_mdy(s).map(|d| d + chrono::Duration::days(1))
+                .unwrap_or_else(|| today - chrono::Duration::days(30))
+        } else {
+            today - chrono::Duration::days(30)
+        }
+    } else {
+        // No previous check — scan sheet for most recent date
+        let sheet_tab = get_sheet_tab();
+        let range = format!("'{}'!A:A", sheet_tab);
+        let values = sheets_get(&ctx, &range).await.unwrap_or_default();
+        let mut latest: Option<chrono::NaiveDate> = None;
+        for row in &values {
+            if let Some(cell) = row.first() {
+                if let Some(d) = parse_date_mdy(cell.trim()) {
+                    if latest.is_none() || d > latest.unwrap() {
+                        latest = Some(d);
+                    }
+                }
+            }
+        }
+        latest.map(|d| d + chrono::Duration::days(1))
+            .unwrap_or_else(|| today - chrono::Duration::days(30))
+    };
+
+    if start_date > yesterday {
+        // Nothing to backfill
+        let today_str = today.format("%m/%d/%Y").to_string();
+        let _ = store.set("last-ooo-check", serde_json::json!(today_str));
+        return Ok(0);
+    }
+
+    // Collect all existing dates from relevant month tabs
+    let mut existing_dates: std::collections::HashSet<chrono::NaiveDate> = std::collections::HashSet::new();
+    let mut tabs_checked: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let mut d = start_date;
+    while d <= yesterday {
+        let tab = format!("{}/{}", MONTH_NAMES[d.month0() as usize], d.format("%Y"));
+        if tabs_checked.insert(tab.clone()) {
+            let range = format!("'{}'!A:A", tab);
+            let values = sheets_get(&ctx, &range).await.unwrap_or_default();
+            for row in &values {
+                if let Some(cell) = row.first() {
+                    if let Some(parsed) = parse_date_mdy(cell.trim()) {
+                        existing_dates.insert(parsed);
+                    }
+                }
+            }
+        }
+        d += chrono::Duration::days(1);
+    }
+
+    // Find weekdays with no entries
+    let mut missing_dates: Vec<String> = Vec::new();
+    let mut d = start_date;
+    while d <= yesterday {
+        let wd = d.weekday();
+        if wd != chrono::Weekday::Sat && wd != chrono::Weekday::Sun {
+            if !existing_dates.contains(&d) {
+                missing_dates.push(d.format("%m/%d/%Y").to_string());
+            }
+        }
+        d += chrono::Duration::days(1);
+    }
+
+    if missing_dates.is_empty() {
+        let today_str = today.format("%m/%d/%Y").to_string();
+        let _ = store.set("last-ooo-check", serde_json::json!(today_str));
+        return Ok(0);
+    }
+
+    // Mark them as OOO
+    let count = mark_ooo(app, missing_dates, String::new()).await?;
+    Ok(count)
+}
+
+fn parse_date_mdy(s: &str) -> Option<chrono::NaiveDate> {
+    let parts: Vec<&str> = s.split('/').collect();
+    if parts.len() != 3 { return None; }
+    let month: u32 = parts[0].trim_start_matches('0').parse().ok()?;
+    let day: u32 = parts[1].trim_start_matches('0').parse().ok()?;
+    let year: i32 = parts[2].parse().ok()?;
+    chrono::NaiveDate::from_ymd_opt(year, month, day)
+}
+
 fn urlencoding(s: &str) -> String {
     s.replace('%', "%25")
         .replace(' ', "%20")
