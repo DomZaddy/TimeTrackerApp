@@ -130,6 +130,8 @@
 
     // Auto-check for updates on launch (delay 3s so UI loads first)
     setTimeout(autoCheckUpdate, 3000);
+    // Re-check for updates every 30 minutes
+    const updateCheckInterval = setInterval(autoCheckUpdate, 30 * 60 * 1000);
 
     // Backfill OOO on launch (delay 5s so auth loads first)
     setTimeout(backfillOoo, 5000);
@@ -142,6 +144,7 @@
       unsubs.forEach((u) => u());
       if (saveInterval) clearInterval(saveInterval);
       if (oooCheckInterval) clearInterval(oooCheckInterval);
+      if (updateCheckInterval) clearInterval(updateCheckInterval);
       nudges.stopNudgeChecks();
     };
   });
@@ -413,14 +416,26 @@
   }
 
   async function autoCheckUpdate() {
-    updateStatus = "checking";
-    const result = await tauri.checkForUpdate();
-    if (result.available) {
-      updateStatus = "available";
-      updateVersion = result.version;
-      updateRef = result;
-    } else {
+    try {
+      updateStatus = "checking";
+      console.log("[updater] checking for updates...");
+      const result = await tauri.checkForUpdate();
+      if (result.available) {
+        updateStatus = "available";
+        updateVersion = result.version;
+        updateRef = result;
+        console.log(`[updater] update available: v${result.version}`);
+      } else {
+        updateStatus = "";
+        if (result.error) {
+          console.warn("[updater] check returned error:", result.error);
+        } else {
+          console.log("[updater] no update available");
+        }
+      }
+    } catch (e) {
       updateStatus = "";
+      console.error("[updater] autoCheckUpdate failed:", e);
     }
   }
 
