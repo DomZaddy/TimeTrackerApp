@@ -27,6 +27,13 @@
       tab: 'tracker',
     },
     {
+      target: '.ooo-section',
+      icon: '🏖',
+      title: 'Out of Office',
+      text: "Taking a day off? Tap the OOO button to mark today as Out of Office — pick a reason like PTO, Sick, or type your own. Missed days are auto-filled too!",
+      tab: 'tracker',
+    },
+    {
       target: '.task-section',
       icon: '📋',
       title: 'What Are You Doing?',
