@@ -247,12 +247,15 @@
       const startTime = customTime || Date.now();
       timer.start(customTime);
       session.startSession(startTime);
-      taskInput = "";
+      // Preserve any task text entered before clocking in
+      if (taskInput.trim()) {
+        session.commitTask(taskInput);
+      }
       gamification.onClockIn(startTime);
       nudges.startNudgeChecks();
       if (soundsOn) playClockIn();
 
-      tauri.sheetsStatusStart({ task: "", start_time: startTime, elapsed: 0 });
+      tauri.sheetsStatusStart({ task: taskInput || "", start_time: startTime, elapsed: 0 });
       weeklyHours.fetchWeekHours(true);
 
       if (saveInterval) clearInterval(saveInterval);
