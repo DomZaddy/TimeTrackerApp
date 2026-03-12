@@ -609,12 +609,6 @@ pub async fn mark_ooo(app: &AppHandle, dates: Vec<String>, reason: String) -> Re
         let h_range = format!("'{}'!H{}", sheet_tab, target_row);
         sheets_update(&ctx, &h_range, vec![vec!["0".to_string()]]).await?;
 
-        // K: Reason note
-        if !reason.is_empty() {
-            let k_range = format!("'{}'!K{}", sheet_tab, target_row);
-            sheets_update_raw(&ctx, &k_range, vec![vec![reason.clone()]]).await?;
-        }
-
         count += 1;
     }
 

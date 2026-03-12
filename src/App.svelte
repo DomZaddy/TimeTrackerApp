@@ -50,6 +50,8 @@
   let lastOooCheckDay = null;
   let showOooMenu = $state(false);
   let oooStatus = $state(""); // "", "marking", "done"
+  let oooCustomReason = $state("");
+  let showOooCustomInput = $state(false);
 
   // Subscribe to stores
   let elapsed = $state(0);
@@ -463,11 +465,24 @@
   function handleGlobalClick(e) {
     if (showOooMenu && !e.target.closest(".ooo-wrapper")) {
       showOooMenu = false;
+      showOooCustomInput = false;
+      oooCustomReason = "";
     }
+  }
+
+  function submitCustomOoo() {
+    const reason = oooCustomReason.trim();
+    if (reason) {
+      markTodayOoo(reason);
+    }
+    showOooCustomInput = false;
+    oooCustomReason = "";
   }
 
   async function markTodayOoo(reason) {
     showOooMenu = false;
+    showOooCustomInput = false;
+    oooCustomReason = "";
     oooStatus = "marking";
     const today = new Date();
     const dateStr = `${String(today.getMonth() + 1).padStart(2, "0")}/${String(today.getDate()).padStart(2, "0")}/${today.getFullYear()}`;
@@ -595,6 +610,21 @@
                         <button onclick={() => markTodayOoo("Sick")}>Sick</button>
                         <button onclick={() => markTodayOoo("Holiday")}>Holiday</button>
                         <button onclick={() => markTodayOoo("Personal")}>Personal</button>
+                        <div class="ooo-menu-divider"></div>
+                        {#if showOooCustomInput}
+                          <div class="ooo-custom-input">
+                            <input
+                              type="text"
+                              placeholder="Custom reason..."
+                              bind:value={oooCustomReason}
+                              onkeydown={(e) => e.key === "Enter" && submitCustomOoo()}
+                              autofocus
+                            />
+                            <button class="ooo-custom-submit" onclick={submitCustomOoo}>Go</button>
+                          </div>
+                        {:else}
+                          <button onclick={() => (showOooCustomInput = true)}>Custom...</button>
+                        {/if}
                       </div>
                     {/if}
                   </div>

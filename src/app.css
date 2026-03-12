@@ -1257,6 +1257,43 @@ body {
   background: rgba(0, 214, 143, 0.15);
   color: var(--green);
 }
+.ooo-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 4px;
+}
+.ooo-custom-input {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+}
+.ooo-custom-input input {
+  flex: 1;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  min-width: 0;
+}
+.ooo-custom-input input:focus {
+  border-color: var(--accent);
+}
+.ooo-custom-submit {
+  padding: 6px 10px;
+  background: var(--accent);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ooo-custom-submit:hover {
+  background: var(--accent-hover);
+}
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateX(-50%) translateY(4px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
