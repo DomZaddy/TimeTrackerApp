@@ -242,7 +242,7 @@ async fn find_date_row(ctx: &SheetsContext, sheet_tab: &str, date_str: &str) -> 
 
     let mut last_row_for_date: i64 = -1;
     let mut empty_date_row: i64 = -1; // Row with matching date but empty task (reusable)
-    let mut first_empty_row: i64 = -1;
+    let mut first_empty_date_row: i64 = -1; // First row where column A (date) is empty
 
     for (i, row) in values.iter().enumerate() {
         let cell_date = row.first().map(|s| s.trim()).unwrap_or("");
@@ -259,22 +259,26 @@ async fn find_date_row(ctx: &SheetsContext, sheet_tab: &str, date_str: &str) -> 
             last_row_for_date = (i + 1) as i64;
         }
 
-        // Track first completely empty row (skip header row 1)
-        if i > 0 && cell_date.is_empty() && cell_task.is_empty() && first_empty_row < 0 {
-            first_empty_row = (i + 1) as i64;
+        // Track first row where date column is empty (skip header row 1).
+        // We only check column A — column B may contain template formulas.
+        if i > 0 && cell_date.is_empty() && first_empty_date_row < 0 {
+            first_empty_date_row = (i + 1) as i64;
         }
     }
 
-    // Priority: reuse empty date row > after last date row > first empty row > append
-    if empty_date_row > 0 {
-        Ok(empty_date_row)
+    // Priority: reuse empty date row > after last date row > first empty date row > append
+    let chosen = if empty_date_row > 0 {
+        empty_date_row
     } else if last_row_for_date > 0 {
-        Ok(last_row_for_date + 1)
-    } else if first_empty_row > 0 {
-        Ok(first_empty_row)
+        last_row_for_date + 1
+    } else if first_empty_date_row > 0 {
+        first_empty_date_row
     } else {
-        Ok((values.len() + 1) as i64)
-    }
+        (values.len() + 1) as i64
+    };
+    println!("[find_date_row] tab={} date={} -> row {} (values.len={}, empty_date={}, last_for_date={}, first_empty_date={})",
+        sheet_tab, date_str, chosen, values.len(), empty_date_row, last_row_for_date, first_empty_date_row);
+    Ok(chosen)
 }
 
 pub async fn push_session(app: &AppHandle, rows: Vec<SessionBlock>) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
