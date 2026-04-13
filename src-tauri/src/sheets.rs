@@ -335,7 +335,7 @@ pub async fn push_session(app: &AppHandle, rows: Vec<SessionBlock>) -> Result<us
 
         // H: Total Hours formula (USER_ENTERED so Sheets interprets the formula)
         let h_range = format!("'{}'!H{}", sheet_tab, r);
-        let h_formula = format!("=IF(OR(E{}=\"\",F{}=\"\"),0,(F{}-E{})*24-G{})", r, r, r, r, r);
+        let h_formula = format!("=IF(OR(E{}=\"\",F{}=\"\"),0,(IF(F{}<E{},F{}+1,F{})-E{})*24-G{})", r, r, r, r, r, r, r, r);
         sheets_update(&ctx, &h_range, vec![vec![h_formula]]).await?;
 
         // K: Notes (RAW to write as plain text)
