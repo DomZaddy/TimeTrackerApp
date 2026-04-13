@@ -259,9 +259,10 @@ async fn find_date_row(ctx: &SheetsContext, sheet_tab: &str, date_str: &str) -> 
             last_row_for_date = (i + 1) as i64;
         }
 
-        // Track first row where date column is empty (skip header row 1).
-        // We only check column A — column B may contain template formulas.
-        if i > 0 && cell_date.is_empty() && first_empty_date_row < 0 {
+        // Track first row that doesn't already hold a dated session (skip header row 1).
+        // A row is "available" if column A is blank OR contains something that isn't a
+        // valid MM/DD/YYYY date (e.g. "Entry" row numbers from the template).
+        if i > 0 && parse_date_mdy(cell_date).is_none() && first_empty_date_row < 0 {
             first_empty_date_row = (i + 1) as i64;
         }
     }
